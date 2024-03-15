@@ -4,13 +4,17 @@ namespace MauticPlugin\LeuchtfeuerDwcDeviceTypeBundle\EventListener;
 
 use Mautic\DynamicContentBundle\DynamicContentEvents;
 use Mautic\DynamicContentBundle\Event\ContactFiltersEvaluateEvent;
+use Mautic\DynamicContentBundle\Helper\DynamicContentHelper;
+use Mautic\EmailBundle\EventListener\MatchFilterForLeadTrait;
 use Mautic\LeadBundle\Model\DeviceModel;
 use Mautic\PluginBundle\Helper\IntegrationHelper;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 class DynamicContentSubscriber implements EventSubscriberInterface
 {
-    public function __construct(private IntegrationHelper $helper, private DeviceModel $deviceModel)
+    use MatchFilterForLeadTrait;
+
+    public function __construct(private IntegrationHelper $helper, private DeviceModel $deviceModel, private DynamicContentHelper $dynamicContentHelper)
     {
     }
 
@@ -23,6 +27,8 @@ class DynamicContentSubscriber implements EventSubscriberInterface
 
     public function onContactFiltersEvaluate(ContactFiltersEvaluateEvent $event): void
     {
+        $extendedPassed = false;
+
         $myIntegration = $this->helper->getIntegrationObject('LeuchtfeuerDwcDeviceType');
 
         if (false === $myIntegration || !$myIntegration->getIntegrationSettings()->getIsPublished()) {
@@ -38,31 +44,27 @@ class DynamicContentSubscriber implements EventSubscriberInterface
         }
 
         $deviceType = $leadDevice[0]['device'];
-        foreach ($filters as $filter) {
+        foreach ($filters as $key => $filter) {
             if ('device_type' === $filter['type']) {
                 switch ($filter['operator']) {
                     case 'in':
                         if (in_array($deviceType, $filter['filter'])) {
-                            $event->setIsEvaluated(true);
-                            $event->setIsMatched(in_array($deviceType, $filter['filter']));
+                            $extendedPassed = in_array($deviceType, $filter['filter']);
                         }
                         break;
                     case '!in':
                         if (!in_array($deviceType, $filter['filter'])) {
-                            $event->setIsEvaluated(true);
-                            $event->setIsMatched(!in_array($deviceType, $filter['filter']));
+                            $extendedPassed = !in_array($deviceType, $filter['filter']);
                         }
                         break;
                     case 'empty':
                         if (empty($deviceType)) {
-                            $event->setIsEvaluated(true);
-                            $event->setIsMatched(empty($deviceType));
+                            $extendedPassed = empty($deviceType);
                         }
                         break;
                     case '!empty':
                         if (!empty($deviceType)) {
-                            $event->setIsEvaluated(true);
-                            $event->setIsMatched(!empty($deviceType));
+                            $extendedPassed = !empty($deviceType);
                         }
                         break;
                     default:
@@ -70,7 +72,17 @@ class DynamicContentSubscriber implements EventSubscriberInterface
                         $event->setIsMatched(false);
                         break;
                 }
+                unset($filters[$key]);
             }
+        }
+
+        if ($extendedPassed === true && $this->matchFilterForLead($filters, $this->dynamicContentHelper->convertLeadToArray($contact)) === true ) {
+            $event->setIsEvaluated(true);
+            $event->setIsMatched(true);
+            return;
+        } else {
+            $event->setIsEvaluated(true);
+            $event->setIsMatched(false);
         }
     }
 }
